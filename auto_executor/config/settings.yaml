@@ -1,0 +1,4 @@
+ocr:
+  engine: pytesseract
+recording:
+  fps: 5
