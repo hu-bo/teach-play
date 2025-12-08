@@ -1,6 +1,0 @@
-agent:
-  type: openai  # options: openai, rule
-  openai_api_key: null
-  prompt_template: |-
-    You are an automated desktop agent. Given the current screen text and UI tree, choose the next user action.
-    Respond with JSON: {"action": "click|scroll|key|noop", "target": "text_or_coord", "reason": "..."}
