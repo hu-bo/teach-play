@@ -208,31 +208,41 @@ decision = await engine.decide(
 
 ## 开发指南
 
+### 使用 Conda 创建 Python 3.11 环境
+
+推荐先创建独立的 Conda 虚拟环境，并确保 Python 版本为 3.11，例如：
+
+```bash
+conda create -n teachplay python=3.11
+conda activate teachplay
+```
+
+
 ### 安装 SDK 开发依赖
 
 ```bash
 # recorder-sdk
 cd sdk/recorder-sdk
-pip install -e ".[dev]"
+pip install -e ".[dev]" -i https://mirrors.aliyun.com/pypi/simple
 
 # playback-sdk
 cd sdk/playback-sdk
-pip install -e ".[dev]"
+pip install -e ".[dev]" -i https://mirrors.aliyun.com/pypi/simple
 
 # ocr-adapter
 cd sdk/ocr-adapter
-pip install -e ".[all,dev]"
+pip install -e ".[all,dev]" -i https://mirrors.aliyun.com/pypi/simple
 
 # ai-decision-core
 cd sdk/ai-decision-core
-pip install -e ".[all,dev]"
+pip install -e ".[all,dev]" -i https://mirrors.aliyun.com/pypi/simple
 ```
 
 ### 运行后端服务（开发模式）
 
 ```bash
 cd services
-pip install -r requirements.txt
+pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 python -m uvicorn app.main:app --reload
 ```
 
