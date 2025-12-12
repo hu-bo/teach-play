@@ -1,0 +1,33 @@
+{
+  "identifier": "com.teachplay.client",
+  "productName": "TeachPlay",
+  "version": "0.1.0",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173"
+  },
+  "app": {
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "TeachPlay",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "dmg",
+      "msi"
+    ],
+    "icon": []
+  }
+}
