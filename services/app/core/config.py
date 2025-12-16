@@ -22,10 +22,10 @@ class Settings(BaseSettings):
 
     # MinIO配置
     MINIO_ENDPOINT: str = "localhost:9000"
-    MINIO_ACCESS_KEY: str = "minioadmin"
-    MINIO_SECRET_KEY: str = "minioadmin"
+    MINIO_ACCESS_KEY: str = "E01n5BAk0veWLQ6kzCCa"
+    MINIO_SECRET_KEY: str = "1vQYGXCfIlVErFY1ifR68gD40irDxgnU9gPs4leE"
     MINIO_SECURE: bool = False
-    MINIO_BUCKET: str = "teachplay"
+    MINIO_BUCKET: str = "tech-play"
 
     # AI配置
     AI_PROVIDER: str = "openai"
