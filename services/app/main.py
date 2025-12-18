@@ -4,8 +4,8 @@ FastAPI应用入口
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from .core.config import settings
+from .core.database import init_db
 from .api import api_router
 
 app = FastAPI(
@@ -20,12 +20,14 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 注册API路由
+# 初始化数据库并注册API路由
+init_db()
 app.include_router(api_router, prefix=settings.API_PREFIX)
 
 

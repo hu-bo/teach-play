@@ -90,13 +90,17 @@ class MacOSCapture:
 
         for window in window_list:
             window_id = window.get("kCGWindowNumber", 0)
-            title = window.get("kCGWindowName", "") or ""
             owner = window.get("kCGWindowOwnerName", "") or ""
             bounds = window.get("kCGWindowBounds", {})
+            layer = int(window.get("kCGWindowLayer", 0))
 
-            # 过滤掉没有标题的窗口和系统窗口
-            if not title or owner in ["Window Server", "Dock"]:
+            # 仅保留应用层窗口并排除核心系统进程
+            if layer != 0 or owner in ["Window Server", "Dock"]:
                 continue
+
+            title = window.get("kCGWindowName")
+            if not title:
+                title = owner or f"Window {window_id}"
 
             rect = Region(
                 x=int(bounds.get("X", 0)),
@@ -119,6 +123,7 @@ class MacOSCapture:
         return windows
 
     def _get_window_thumbnail(self, window_id: int, max_size: int = 200) -> Optional[bytes]:
+
         """获取窗口缩略图"""
         if not self._available:
             return None
@@ -137,7 +142,7 @@ class MacOSCapture:
                 window_id,
                 kCGWindowImageDefault
             )
-
+ 
             if image is None:
                 return None
 

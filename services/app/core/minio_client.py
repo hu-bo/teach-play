@@ -79,7 +79,7 @@ class MinIOClient:
             文件数据
         """
         client = self._get_client()
-
+        
         try:
             response = client.get_object(
                 bucket_name=settings.MINIO_BUCKET,

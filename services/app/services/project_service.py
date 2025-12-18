@@ -1,144 +1,138 @@
-"""
-项目服务
-"""
+"""项目服务"""
 
-import json
-from typing import Optional
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Optional
 
-from ..models.project import Project, ProjectCreate, ProjectUpdate
+from sqlalchemy import select
+
+from ..core.database import session_scope
 from ..core.minio_client import minio_client
+from ..db.models import ProjectRecord, RecordingRecord
+from ..models.project import Project, ProjectCreate, ProjectUpdate
+from .file_service import FileService
 
 
 class ProjectService:
     """项目服务"""
 
     @staticmethod
-    def _get_project_path(project_id: str) -> str:
-        """获取项目存储路径"""
-        return f"projects/{project_id}/project.json"
+    def _to_model(record: ProjectRecord) -> Project:
+        recordings = [rec.id for rec in record.recordings]
+        return Project(
+            id=record.id,
+            name=record.name,
+            description=record.description,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            recordings=recordings,
+        )
 
     @staticmethod
     def list_projects() -> list[Project]:
         """获取项目列表"""
-        projects = []
-
-        try:
-            # 列出所有项目目录
-            objects = minio_client.list_objects("projects/")
-            project_files = [o for o in objects if o.endswith("/project.json")]
-
-            for obj_path in project_files:
-                data = minio_client.download_file(obj_path)
-                if data:
-                    project_dict = json.loads(data.decode())
-                    projects.append(Project(**project_dict))
-        except Exception as e:
-            print(f"Warning: Failed to list projects from MinIO: {e}")
-            # MinIO 不可用时返回空列表
-
-        return projects
+        with session_scope() as session:
+            stmt = select(ProjectRecord).order_by(ProjectRecord.created_at.asc())
+            records = session.scalars(stmt).all()
+            return [ProjectService._to_model(record) for record in records]
 
     @staticmethod
     def get_project(project_id: str) -> Optional[Project]:
         """获取项目详情"""
-        path = ProjectService._get_project_path(project_id)
-        data = minio_client.download_file(path)
-
-        if data:
-            project_dict = json.loads(data.decode())
-            return Project(**project_dict)
-
-        return None
+        with session_scope() as session:
+            record = session.get(ProjectRecord, project_id)
+            if not record:
+                return None
+            return ProjectService._to_model(record)
 
     @staticmethod
     def create_project(project_data: ProjectCreate) -> Project:
         """创建项目"""
         project = Project(
             name=project_data.name,
-            description=project_data.description
+            description=project_data.description,
         )
 
-        # 保存到MinIO
-        path = ProjectService._get_project_path(project.id)
-        minio_client.upload_file(
-            json.dumps(project.model_dump(), default=str).encode(),
-            path,
-            "application/json"
-        )
+        with session_scope() as session:
+            record = ProjectRecord(
+                id=project.id,
+                name=project.name,
+                description=project.description,
+                created_at=project.created_at,
+                updated_at=project.updated_at,
+            )
+            session.add(record)
 
         return project
 
     @staticmethod
     def update_project(project_id: str, project_data: ProjectUpdate) -> Optional[Project]:
         """更新项目"""
-        project = ProjectService.get_project(project_id)
-        if not project:
-            return None
+        update_fields = project_data.model_dump(exclude_unset=True)
+        if not update_fields:
+            return ProjectService.get_project(project_id)
 
-        # 更新字段
-        update_data = project_data.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            if value is not None:
-                setattr(project, key, value)
+        with session_scope() as session:
+            record = session.get(ProjectRecord, project_id)
+            if not record:
+                return None
 
-        project.updated_at = datetime.now()
+            for key, value in update_fields.items():
+                if value is not None and hasattr(record, key):
+                    setattr(record, key, value)
 
-        # 保存
-        path = ProjectService._get_project_path(project_id)
-        minio_client.upload_file(
-            json.dumps(project.model_dump(), default=str).encode(),
-            path,
-            "application/json"
-        )
-
-        return project
+            record.updated_at = datetime.now()
+            session.add(record)
+            session.flush()
+            session.refresh(record)
+            return ProjectService._to_model(record)
 
     @staticmethod
     def delete_project(project_id: str) -> bool:
         """删除项目"""
-        # 删除项目文件
-        path = ProjectService._get_project_path(project_id)
-        minio_client.delete_file(path)
+        # 收集所有关联的录制
+        with session_scope() as session:
+            record = session.get(ProjectRecord, project_id)
+            if not record:
+                return False
+            recording_ids = [rec.id for rec in record.recordings]
 
-        # 删除项目目录下的所有文件
-        objects = minio_client.list_objects(f"projects/{project_id}/")
-        for obj in objects:
-            minio_client.delete_file(obj)
+        # 删除录制（包含 MinIO 文件）
+        from .recording_service import RecordingService
 
-        # 删除相关录制
-        recordings = minio_client.list_objects(f"recordings/")
-        for obj in recordings:
-            if obj.endswith("/recording.json"):
-                data = minio_client.download_file(obj)
-                if data:
-                    recording = json.loads(data.decode())
-                    if recording.get("project_id") == project_id:
-                        # 删除录制及其截图
-                        rec_id = recording.get("id")
-                        minio_client.delete_file(obj)
-                        screenshots = minio_client.list_objects(f"screenshots/{rec_id}/")
-                        for ss in screenshots:
-                            minio_client.delete_file(ss)
+        for rec_id in recording_ids:
+            RecordingService.delete_recording(rec_id)
+
+        # 删除项目级别的文件
+        for file_info in FileService.list_files(project_id=project_id):
+            minio_client.delete_file(file_info.path)
+            FileService.delete_file(file_info.path)
+
+        # 删除项目记录
+        with session_scope() as session:
+            record = session.get(ProjectRecord, project_id)
+            if record:
+                session.delete(record)
 
         return True
 
     @staticmethod
     def add_recording_to_project(project_id: str, recording_id: str) -> Optional[Project]:
-        """将录制添加到项目"""
-        project = ProjectService.get_project(project_id)
-        if not project:
-            return None
+        """确保录制归属于指定项目"""
+        with session_scope() as session:
+            project = session.get(ProjectRecord, project_id)
+            if not project:
+                return None
 
-        if recording_id not in project.recordings:
-            project.recordings.append(recording_id)
-            project.updated_at = datetime.now()
+            recording = session.get(RecordingRecord, recording_id)
+            if not recording:
+                return None
 
-            path = ProjectService._get_project_path(project_id)
-            minio_client.upload_file(
-                json.dumps(project.model_dump(), default=str).encode(),
-                path,
-                "application/json"
-            )
+            if recording.project_id != project_id:
+                recording.project_id = project_id
+                session.add(recording)
 
-        return project
+            session.flush()
+            session.refresh(project)
+            return ProjectService._to_model(project)

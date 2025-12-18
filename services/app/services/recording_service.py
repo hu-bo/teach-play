@@ -2,9 +2,17 @@
 录制管理服务
 """
 
+from __future__ import annotations
+
 import json
+from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import select
+
+from ..core.database import session_scope
+from ..core.minio_client import minio_client
+from ..db.models import RecordingRecord
 from ..models.recording import (
     Recording,
     RecordingCreate,
@@ -13,7 +21,7 @@ from ..models.recording import (
     StepCreate,
     StepUpdate,
 )
-from ..core.minio_client import minio_client
+from .file_service import FileService
 from .project_service import ProjectService
 
 
@@ -26,57 +34,161 @@ class RecordingService:
         return f"recordings/{recording_id}/recording.json"
 
     @staticmethod
-    def list_recordings(project_id: Optional[str] = None) -> list[Recording]:
-        """获取录制列表"""
-        recordings = []
+    def _get_record_row(recording_id: str) -> Optional[RecordingRecord]:
+        with session_scope() as session:
+            return session.get(RecordingRecord, recording_id)
 
+    @staticmethod
+    def _load_recording_from_storage(record: RecordingRecord) -> Optional[Recording]:
+        if not record.minio_object:
+            return None
+
+        data = minio_client.download_file(record.minio_object)
+        if not data:
+            return None
+
+        try:
+            payload = json.loads(data.decode())
+            return Recording(**payload)
+        except Exception as exc:
+            print(f"Error parsing recording {record.id}: {exc}")
+            return None
+
+    @staticmethod
+    def _load_recording_from_path(object_path: str, recording_id: str) -> Optional[Recording]:
+        data = minio_client.download_file(object_path)
+        if not data:
+            return None
+
+        try:
+            payload = json.loads(data.decode())
+            recording = Recording(**payload)
+        except Exception as exc:
+            print(f"Error decoding recording {recording_id}: {exc}")
+            return None
+
+        RecordingService._persist_metadata(recording, object_path)
+        FileService.register_file(
+            object_path,
+            content_type="application/json",
+            size=len(data),
+            project_id=recording.project_id,
+            recording_id=recording.id,
+        )
+        return recording
+
+    @staticmethod
+    def _persist_metadata(recording: Recording, object_path: str) -> None:
+        with session_scope() as session:
+            record = session.get(RecordingRecord, recording.id)
+            if record:
+                record.name = recording.name
+                record.project_id = recording.project_id
+                record.minio_object = object_path
+                record.updated_at = datetime.now()
+            else:
+                record = RecordingRecord(
+                    id=recording.id,
+                    name=recording.name,
+                    project_id=recording.project_id,
+                    minio_object=object_path,
+                    created_at=recording.created_at,
+                    updated_at=datetime.now(),
+                )
+                session.add(record)
+            session.flush()
+
+    @staticmethod
+    def _upload_recording(recording: Recording) -> Recording:
+        payload = json.dumps(recording.model_dump(), default=str).encode()
+        path = RecordingService._get_recording_path(recording.id)
+
+        minio_client.upload_file(payload, path, "application/json")
+        FileService.register_file(
+            path,
+            content_type="application/json",
+            size=len(payload),
+            project_id=recording.project_id,
+            recording_id=recording.id,
+        )
+        RecordingService._persist_metadata(recording, path)
+        return recording
+
+    @staticmethod
+    def _bootstrap_from_minio(project_id: Optional[str] = None) -> list[Recording]:
+        recordings: list[Recording] = []
         objects = minio_client.list_objects("recordings/")
         recording_files = [o for o in objects if o.endswith("/recording.json")]
 
-        for obj_path in recording_files:
-            data = minio_client.download_file(obj_path)
-            if data:
-                recording_dict = json.loads(data.decode())
+        for object_name in recording_files:
+            data = minio_client.download_file(object_name)
+            if not data:
+                continue
 
-                # 如果指定了项目ID，过滤
-                if project_id and recording_dict.get("project_id") != project_id:
-                    continue
+            try:
+                payload = json.loads(data.decode())
+                recording = Recording(**payload)
+            except Exception as exc:
+                print(f"Error decoding recording file {object_name}: {exc}")
+                continue
 
-                recordings.append(Recording(**recording_dict))
+            if project_id and recording.project_id != project_id:
+                continue
+
+            RecordingService._persist_metadata(recording, object_name)
+            FileService.register_file(
+                object_name,
+                content_type="application/json",
+                size=len(data),
+                project_id=recording.project_id,
+                recording_id=recording.id,
+            )
+            recordings.append(recording)
 
         return recordings
 
     @staticmethod
+    def list_recordings(project_id: Optional[str] = None) -> list[Recording]:
+        """获取录制列表"""
+        with session_scope() as session:
+            stmt = select(RecordingRecord).order_by(RecordingRecord.created_at.asc())
+            if project_id:
+                stmt = stmt.where(RecordingRecord.project_id == project_id)
+            records = session.scalars(stmt).all()
+
+        result: list[Recording] = []
+        for record in records:
+            recording = RecordingService._load_recording_from_storage(record)
+            if recording:
+                result.append(recording)
+
+        if not result:
+            return RecordingService._bootstrap_from_minio(project_id)
+
+        return result
+
+    @staticmethod
     def get_recording(recording_id: str) -> Optional[Recording]:
         """获取录制详情"""
+        record = RecordingService._get_record_row(recording_id)
+        if record:
+            recording = RecordingService._load_recording_from_storage(record)
+            if recording:
+                return recording
+
         path = RecordingService._get_recording_path(recording_id)
-        data = minio_client.download_file(path)
-
-        if data:
-            recording_dict = json.loads(data.decode())
-            return Recording(**recording_dict)
-
-        return None
+        return RecordingService._load_recording_from_path(path, recording_id)
 
     @staticmethod
     def create_recording(recording_data: RecordingCreate) -> Recording:
         """创建录制"""
         recording = Recording(
             name=recording_data.name,
-            project_id=recording_data.project_id
+            project_id=recording_data.project_id,
         )
 
-        # 保存到MinIO
-        path = RecordingService._get_recording_path(recording.id)
-        minio_client.upload_file(
-            json.dumps(recording.model_dump(), default=str).encode(),
-            path,
-            "application/json"
-        )
-
-        # 添加到项目
+        recording = RecordingService._upload_recording(recording)
         ProjectService.add_recording_to_project(recording.project_id, recording.id)
-
         return recording
 
     @staticmethod
@@ -88,17 +200,10 @@ class RecordingService:
 
         update_data = recording_data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
-            if value is not None:
+            if value is not None and hasattr(recording, key):
                 setattr(recording, key, value)
 
-        path = RecordingService._get_recording_path(recording_id)
-        minio_client.upload_file(
-            json.dumps(recording.model_dump(), default=str).encode(),
-            path,
-            "application/json"
-        )
-
-        return recording
+        return RecordingService._upload_recording(recording)
 
     @staticmethod
     def delete_recording(recording_id: str) -> bool:
@@ -107,26 +212,30 @@ class RecordingService:
         if not recording:
             return False
 
-        # 删除录制文件
-        path = RecordingService._get_recording_path(recording_id)
-        minio_client.delete_file(path)
+        record_row = RecordingService._get_record_row(recording_id)
+        object_path = (
+            record_row.minio_object if record_row else RecordingService._get_recording_path(recording_id)
+        )
 
-        # 删除截图
+        minio_client.delete_file(object_path)
+        FileService.delete_file(object_path)
+
         screenshots = minio_client.list_objects(f"screenshots/{recording_id}/")
         for ss in screenshots:
             minio_client.delete_file(ss)
+            FileService.delete_file(ss)
+
+        with session_scope() as session:
+            row = session.get(RecordingRecord, recording_id)
+            if row:
+                session.delete(row)
 
         return True
 
     @staticmethod
     def save_recording(recording: Recording) -> None:
         """保存录制"""
-        path = RecordingService._get_recording_path(recording.id)
-        minio_client.upload_file(
-            json.dumps(recording.model_dump(), default=str).encode(),
-            path,
-            "application/json"
-        )
+        RecordingService._upload_recording(recording)
 
     # 步骤管理
 

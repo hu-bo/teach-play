@@ -114,7 +114,7 @@ class Recording(RecordingBase):
     id: str = Field(default_factory=lambda: f"rec_{uuid.uuid4().hex[:8]}")
     created_at: datetime = Field(default_factory=datetime.now)
     target_window: Optional[TargetWindow] = None
-    steps: list[Step] = []
+    steps: list[Step] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

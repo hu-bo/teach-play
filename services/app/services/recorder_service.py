@@ -3,8 +3,9 @@
 """
 
 import base64
+import logging
 import time
-from typing import Optional
+from typing import Optional, Any
 from dataclasses import dataclass
 
 # SDK imports will be available when SDK is installed
@@ -19,6 +20,9 @@ from ..models.common import WindowInfo as WindowInfoModel, Region
 from ..models.recording import Recording, Step
 from ..core.minio_client import minio_client
 from .recording_service import RecordingService
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,34 +60,17 @@ class RecorderServiceSingleton:
         """获取窗口列表"""
         if Recorder is None:
             # SDK未安装，返回模拟数据
-            return [
-                WindowInfoModel(
-                    window_id="mock_1",
-                    title="Mock Window 1",
-                    process_name="mock.exe",
-                    rect=Region(x=0, y=0, width=1920, height=1080),
-                    thumbnail=None
-                )
-            ]
+            logger.warning("Recorder SDK not installed, returning mock windows")
+            return self._build_mock_windows()
 
-        recorder = Recorder(RecorderConfig())
-        windows = recorder.list_windows()
+        try:
+            recorder = Recorder(RecorderConfig())
+            windows = recorder.list_windows()
+        except Exception as exc:  # 捕获底层截图异常，避免接口崩溃
+            logger.exception("Failed to list windows: %s", exc)
+            return self._build_mock_windows()
 
-        return [
-            WindowInfoModel(
-                window_id=w.window_id,
-                title=w.title,
-                process_name=w.process_name,
-                rect=Region(
-                    x=w.rect.x,
-                    y=w.rect.y,
-                    width=w.rect.width,
-                    height=w.rect.height
-                ),
-                thumbnail=base64.b64encode(w.thumbnail).decode() if w.thumbnail else None
-            )
-            for w in windows
-        ]
+        return [self._to_window_model(w) for w in windows]
 
     def start_recording(
         self,
@@ -195,6 +182,41 @@ class RecorderServiceSingleton:
             step.amount = sdk_step.amount
 
         return step
+
+    def _build_mock_windows(self) -> list[WindowInfoModel]:
+        """生成SDK缺失或异常时的占位窗口"""
+        return [
+            WindowInfoModel(
+                window_id="mock_1",
+                title="Mock Window 1",
+                process_name="mock.exe",
+                rect=Region(x=0, y=0, width=1920, height=1080),
+                thumbnail=None
+            )
+        ]
+
+    def _to_window_model(self, window: Any) -> WindowInfoModel:
+        """将SDK窗口数据转换为API模型"""
+        rect = window.rect
+        thumbnail = None
+        if getattr(window, "thumbnail", None):
+            try:
+                thumbnail = base64.b64encode(window.thumbnail).decode()
+            except Exception:
+                logger.exception("Failed to encode thumbnail for window %s", window.window_id)
+
+        return WindowInfoModel(
+            window_id=str(window.window_id),
+            title=window.title,
+            process_name=getattr(window, "process_name", ""),
+            rect=Region(
+                x=rect.x,
+                y=rect.y,
+                width=rect.width,
+                height=rect.height
+            ),
+            thumbnail=thumbnail
+        )
 
 
 # 全局单例

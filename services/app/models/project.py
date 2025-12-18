@@ -30,7 +30,7 @@ class Project(ProjectBase):
     id: str = Field(default_factory=lambda: f"proj_{uuid.uuid4().hex[:8]}")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
-    recordings: list[str] = []  # 录制ID列表
+    recordings: list[str] = Field(default_factory=list)  # 录制ID列表
 
     class Config:
         from_attributes = True

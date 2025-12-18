@@ -18,7 +18,13 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api"
 
     # CORS配置
-    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:1420"]
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+    ]
+    CORS_ORIGIN_REGEX: Optional[str] = r"^(https?|tauri)://(localhost|127\.0\.0\.1)(:\d+)?$"
 
     # MinIO配置
     MINIO_ENDPOINT: str = "localhost:9000"
@@ -26,6 +32,9 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "1vQYGXCfIlVErFY1ifR68gD40irDxgnU9gPs4leE"
     MINIO_SECURE: bool = False
     MINIO_BUCKET: str = "tech-play"
+
+    # 数据库配置
+    SQLITE_DB_PATH: str = "data/app.db"
 
     # AI配置
     AI_PROVIDER: str = "openai"

@@ -18,7 +18,7 @@ except ImportError:
 from ..models.recording import Recording, Step
 from .recording_service import RecordingService
 
-
+print(Player)
 class PlaybackStatus(str, Enum):
     """回放状态"""
     IDLE = "idle"
