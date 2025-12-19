@@ -153,20 +153,20 @@ class Recorder:
         # 根据事件类型设置步骤属性
         if event.event_type == EventType.CLICK:
             step.step_type = "click"
-            step.mode = "smart"  # 默认智能模式
+            step.mode = "fixed"  # 默认智能模式
             step.button = event.data.get("button", "left")
             self._capture_and_ocr(step, event.position)
 
         elif event.event_type == EventType.DOUBLE_CLICK:
             step.step_type = "click"
-            step.mode = "smart"
+            step.mode = "fixed"
             step.button = "left"
             step.description = "双击"
             self._capture_and_ocr(step, event.position)
 
         elif event.event_type == EventType.RIGHT_CLICK:
             step.step_type = "click"
-            step.mode = "smart"
+            step.mode = "fixed"
             step.button = "right"
             self._capture_and_ocr(step, event.position)
 
